@@ -12,13 +12,13 @@ env_to_use = 'CartPole-v0'
 
 # hyperparameters
 gamma = 1.				# reward discount factor
-lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
-lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
-h_actor = 4				# hidden layer size for actor
-h_critic = 4			# hidden layer size for critic
+lambda_actor = 0.8		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
+lambda_critic = 0.8		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
+h_actor = 128			# hidden layer size for actor
+h_critic = 128			# hidden layer size for critic
 lr_actor = 1e-3			# learning rate for actor
 lr_critic = 1e-3		# learning rate for critic
-num_episodes = 200		# number of episodes
+num_episodes = 500		# number of episodes
 max_steps_ep = 200		# maximum number of timesteps to wait for `done` per episode
 
 # game parameters
@@ -56,26 +56,65 @@ tf.reset_default_graph()
 
 # placeholders
 state_ph = tf.placeholder(dtype=tf.float32, shape=[1,state_dim]) # Needs to be rank >=2
-action_ph = tf.placeholder(dtype=tf.int32, shape=())
+action_ph = tf.placeholder(dtype=tf.int32, shape=()) # for computing policy gradient for action taken
+delta_ph = tf.placeholder(dtype=tf.float32, shape=()) # R + gamma*V(S') - V(S) -- for computing grad steps
 
 # actor network
 with tf.variable_scope('actor', reuse=False):
 	actor_hidden = tf.layers.dense(state_ph, h_actor, activation = tf.nn.relu)
-	actor_logits = tf.layers.dense(actor_hidden, n_actions)
+	actor_logits = tf.squeeze(tf.layers.dense(actor_hidden, n_actions))
 	actor_logits -= tf.reduce_max(actor_logits) # for numerical stability
 	actor_policy = tf.nn.softmax(actor_logits)
-	actor_logprob_action = actor_logits[0,action_ph] - tf.reduce_logsumexp(actor_logits)
+	actor_logprob_action = actor_logits[action_ph] - tf.reduce_logsumexp(actor_logits)
 
 # critic network
 with tf.variable_scope('critic', reuse=False):
 	critic_hidden = tf.layers.dense(state_ph, h_critic, activation = tf.nn.relu)
-	critic_value = tf.layers.dense(critic_hidden, 1)
+	critic_value = tf.squeeze(tf.layers.dense(critic_hidden, 1))
+
+# isolate vars for each network
+actor_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
+critic_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic')
 
 # gradients
-actor_logprob_action_grad = tf.gradients(actor_logprob_action, 
-	tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor'))
-critic_value_grad = tf.gradients(critic_value,
-	tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic'))
+actor_logprob_action_grads = tf.gradients(actor_logprob_action, actor_vars)
+critic_value_grads = tf.gradients(critic_value, critic_vars)
+
+# collect stuff for actor and critic updates
+ac_update_inputs = dict(
+	actor = dict(
+		vars = actor_vars,
+		grads = actor_logprob_action_grads,
+		lambda_ = lambda_actor,
+		lr = lr_actor
+	),
+	critic = dict(
+		vars = critic_vars,
+		grads = critic_value_grads,
+		lambda_ = lambda_critic,
+		lr = lr_critic
+	)
+)
+
+# gradient step ops with eligibility traces
+gradient_step_ops = []
+trace_reset_ops = []
+for network in ac_update_inputs: # actor and critic
+	net_update_inputs = ac_update_inputs[network]
+	with tf.variable_scope(network+'/traces'):
+		for var, grad in zip(net_update_inputs['vars'], net_update_inputs['grads']):
+			print('var shape: {}'.format(var.get_shape()))
+			print('grad shape: {}'.format(grad.get_shape()))
+			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
+			# Elig trace update: e <- gamma*lambda*e + grad
+			trace_op = trace.assign(gamma * net_update_inputs['lambda_'] * trace + grad)
+			grad_step_op = var.assign_add(net_update_inputs['lr'] * delta_ph * trace_op)
+			trace_reset_op = trace.assign(tf.zeros(trace.get_shape()))
+			gradient_step_ops.append(grad_step_op)
+			trace_reset_ops.append(trace_reset_op)
+
+td_lambda_op = tf.group(*gradient_step_ops, name='td_lambda')
+trace_reset_op = tf.group(*trace_reset_ops, name='trace_reset')
 
 # initialize session
 sess = tf.Session()	
@@ -93,12 +132,7 @@ for ep in range(num_episodes):
 	total_reward = 0
 
 	# Reset eligibility traces to 0
-	actor_elig_trace = []
-	critic_elig_trace = []
-	for elem in actor_logprob_action_grad:
-		actor_elig_trace.append(np.zeros(elem.shape.as_list()))
-	for elem in critic_value_grad:
-		critic_elig_trace.append(np.zeros(elem.shape.as_list()))
+	_ = sess.run(trace_reset_op)
 
 	# Initial state
 	observation = env.reset()
@@ -106,20 +140,15 @@ for ep in range(num_episodes):
 
 	for t in range(max_steps_ep):
 
-		# compute value of current state, its gradients, and action probabilities
-		v_s, v_s_grads, action_probs = sess.run([critic_value, critic_value_grad, actor_policy], 
+		# compute value of current state and action probabilities
+		v_s, action_probs = sess.run([critic_value, actor_policy], 
 			feed_dict={state_ph: observation[None]})
-		v_s = v_s[0,0]
 
 		# get action
-		action = np.random.choice(n_actions, p=action_probs[0,:])
-
-		# compute gradient of current action log probability
-		action_logprob_grads = sess.run(actor_logprob_action_grad, 
-			feed_dict={state_ph: observation[None], action_ph: action})
+		action = np.random.choice(n_actions, p=action_probs)
 
 		# take step
-		observation, reward, done, _info = env.step(action)
+		next_observation, reward, done, _info = env.step(action)
 		env.render()
 		total_reward += reward*(gamma**t)
 
@@ -127,28 +156,16 @@ for ep in range(num_episodes):
 		if done:
 			v_s_prime = 0
 		else:
-			v_s_prime = sess.run(critic_value, feed_dict={state_ph: observation[None]})
-			v_s_prime = v_s_prime[0,0]
+			v_s_prime = sess.run(critic_value, feed_dict={state_ph: next_observation[None]})
 
 		# compute TD error
 		delta = reward + gamma*v_s_prime - v_s
 
-		# update eligibility traces
-		for i, e in enumerate(actor_elig_trace):
-			actor_elig_trace[i] = gamma*lambda_actor*e + action_logprob_grads[i]
-		for i, e in enumerate(critic_elig_trace):
-			critic_elig_trace[i] = gamma*lambda_critic*e + v_s_grads[i]
+		# update actor and critic params using TD(lambda)
+		_ = sess.run(td_lambda_op,
+			feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta})
 
-		# if t%10==0: print('Actor')
-		# update parameters
-		for i, param in enumerate(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')):
-			# if t%10==0: print(np.linalg.norm(lr_actor*delta*actor_elig_trace[i]) / np.linalg.norm(sess.run(param)) * 1e3)
-			_ = sess.run(tf.assign_add(param, lr_actor*delta*actor_elig_trace[i]))
-		# if t%10==0: print('Critic')
-		for i, param in enumerate(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic')):
-			# if t%10==0: print(np.linalg.norm(lr_actor*delta*critic_elig_trace[i]) / np.linalg.norm(sess.run(param)) * 1e3)
-			_ = sess.run(tf.assign_add(param, lr_critic*delta*critic_elig_trace[i]))
-
+		observation = next_observation
 		if done: break
 
 	print('Episode %2i, Reward: %7.3f'%(ep,total_reward))
