@@ -16,11 +16,11 @@ lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
 lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
 h_actor = 64			# hidden layer size for actor
 h_critic = 64			# hidden layer size for critic
-lr_actor = 1e-3			# learning rate for actor
-lr_critic = 1e-3		# learning rate for critic
+lr_actor = 1e-4			# learning rate for actor
+lr_critic = 1e-4		# learning rate for critic
 num_episodes = 500		# number of episodes
 max_steps_ep = 1000		# default max number of steps per episode (unless env has a lower hardcoded limit)
-clip_norm = 100			# maximum gradient norm for clipping
+clip_norm = 10			# maximum gradient norm for clipping
 
 # game parameters
 env = gym.make(env_to_use)
