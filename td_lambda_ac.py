@@ -19,6 +19,10 @@ h_critic = 64			# hidden layer size for critic
 lr_actor = 1e-3			# learning rate for actor
 lr_critic = 1e-3		# learning rate for critic
 lr_decay = 0.99			# learning rate decay (per episode)
+l2_reg_actor = 1e-6		# L2 regularization factor for actor
+l2_reg_critic = 1e-6	# L2 regularization factor for critic
+dropout_actor = 0.		# dropout rate for actor (0 = no dropout)
+dropout_critic = 0.		# dropout rate for critic (0 = no dropout)
 num_episodes = 500		# number of episodes
 max_steps_ep = 1000		# default max number of steps per episode (unless env has a lower hardcoded limit)
 clip_norm = 10			# maximum gradient norm for clipping
@@ -34,7 +38,7 @@ n_actions = env.action_space.n 								# Assuming discrete action space
 env.seed(0)
 np.random.seed(0)
 
-# prepare monitoring
+# prepare monitorings
 outdir = '/tmp/td_lambda_ac-agent-results'
 env = wrappers.Monitor(env, outdir, force=True)
 def writefile(fname, s):
@@ -50,6 +54,10 @@ info['params'] = dict(
 	lr_actor = lr_actor,
 	lr_critic = lr_critic,
 	lr_decay = lr_decay,
+	l2_reg_actor = l2_reg_actor,
+	l2_reg_critic = l2_reg_critic,
+	dropout_actor = dropout_actor,
+	dropout_critic = dropout_critic,
 	num_episodes = num_episodes,
 	clip_norm = clip_norm,
 	slow_critic_burnin = slow_critic_burnin,
@@ -73,7 +81,8 @@ episode_inc_op = episodes.assign_add(1)
 # actor network
 with tf.variable_scope('actor', reuse=False):
 	actor_hidden = tf.layers.dense(state_ph, h_actor, activation = tf.nn.relu)
-	actor_logits = tf.squeeze(tf.layers.dense(actor_hidden, n_actions))
+	actor_hidden_drop = tf.layers.dropout(actor_hidden, rate = dropout_actor, training = True)
+	actor_logits = tf.squeeze(tf.layers.dense(actor_hidden_drop, n_actions))
 	actor_logits -= tf.reduce_max(actor_logits) # for numerical stability
 	actor_policy = tf.nn.softmax(actor_logits)
 	actor_logprob_action = actor_logits[action_ph] - tf.reduce_logsumexp(actor_logits)
@@ -82,7 +91,8 @@ with tf.variable_scope('actor', reuse=False):
 # the slowly-changing critic used as a target
 def generate_critic_network(s, trainable):
 	critic_hidden = tf.layers.dense(s, h_critic, activation = tf.nn.relu, trainable = trainable)
-	critic_value = tf.squeeze(tf.layers.dense(critic_hidden, 1, trainable = trainable))
+	critic_hidden_drop = tf.layers.dropout(critic_hidden, rate = dropout_critic, training = trainable)
+	critic_value = tf.squeeze(tf.layers.dense(critic_hidden_drop, 1, trainable = trainable))
 	return critic_value
 
 # critic network
@@ -116,13 +126,15 @@ ac_update_inputs = dict(
 		vars = actor_vars,
 		grads = actor_logprob_action_grads,
 		lambda_ = lambda_actor,
-		lr = lr_actor
+		lr = lr_actor,
+		l2_reg = l2_reg_actor
 	),
 	critic = dict(
 		vars = critic_vars,
 		grads = critic_value_grads,
 		lambda_ = lambda_critic,
-		lr = lr_critic
+		lr = lr_critic,
+		l2_reg = l2_reg_critic
 	)
 )
 
@@ -136,18 +148,21 @@ for network in ac_update_inputs: # actor and critic
 	net_update_inputs = ac_update_inputs[network]
 	with tf.variable_scope(network+'/traces'):
 		for var, grad in zip(net_update_inputs['vars'], net_update_inputs['grads']):
+
+			lr = net_update_inputs['lr'] * lr_decay**episodes
+			l2_reg = net_update_inputs['l2_reg']
+			if 'bias' in var.name: l2_reg = 0	# don't regularize biases
+			lambda_ = net_update_inputs['lambda_']
 			
 			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
 			# Elig trace update: e <- gamma*lambda*e + grad
-			trace_op = trace.assign(gamma * net_update_inputs['lambda_'] * trace + 
-				tf.clip_by_norm(grad, clip_norm = clip_norm))
+			trace_op = trace.assign(gamma*lambda_*trace + tf.clip_by_norm(grad, clip_norm = clip_norm))
 
-			lr = net_update_inputs['lr'] * lr_decay**episodes
-
-			grad_step_op = var.assign_add(lr * delta_ph * trace_op)
+			# Gradient step, including for L2 regularization
+			grad_step_op = var.assign_add(lr * (delta_ph*trace_op - l2_reg*var))
 
 			grad_step_sanity_checks.append(
-				tf.norm(lr * delta_ph * trace) / 
+				tf.norm(lr *delta_ph * trace) / 
 				tf.norm(var - lr * delta_ph * trace))
 			grad_norms.append(tf.norm(grad))
 			grad_max_vals.append(tf.reduce_max(tf.abs(grad)))
@@ -270,7 +285,8 @@ gym.upload(outdir)
 	# gradient clipping
 	# delayed critic for target (in delta)
 	# lr decay
+	# l2 reg
+# dropout
 # shared parameters between actor and critic
-# regularization: dropout, L2
 
 	# should there be 0 V(s') award when you finish succesfully?
