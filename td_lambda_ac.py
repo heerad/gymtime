@@ -16,11 +16,14 @@ lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
 lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
 h_actor = 64			# hidden layer size for actor
 h_critic = 64			# hidden layer size for critic
-lr_actor = 1e-4			# learning rate for actor
-lr_critic = 1e-4		# learning rate for critic
+lr_actor = 1e-3			# learning rate for actor
+lr_critic = 1e-3		# learning rate for critic
+lr_decay = 0.99			# learning rate decay (per episode)
 num_episodes = 500		# number of episodes
 max_steps_ep = 1000		# default max number of steps per episode (unless env has a lower hardcoded limit)
 clip_norm = 10			# maximum gradient norm for clipping
+slow_critic_burnin = 1000		# number of steps where slow critic weights are tied to critic weights
+update_slow_critic_every = 20	# number of steps to use slow critic as target before updating it to latest critic
 
 # game parameters
 env = gym.make(env_to_use)
@@ -46,8 +49,11 @@ info['params'] = dict(
 	h_critic = h_critic,
 	lr_actor = lr_actor,
 	lr_critic = lr_critic,
+	lr_decay = lr_decay,
 	num_episodes = num_episodes,
-	clip_norm = clip_norm
+	clip_norm = clip_norm,
+	slow_critic_burnin = slow_critic_burnin,
+	update_slow_critic_every = update_slow_critic_every
 )
 
 #####################################################################################################
@@ -60,6 +66,10 @@ state_ph = tf.placeholder(dtype=tf.float32, shape=[1,state_dim]) # Needs to be r
 action_ph = tf.placeholder(dtype=tf.int32, shape=()) # for computing policy gradient for action taken
 delta_ph = tf.placeholder(dtype=tf.float32, shape=()) # R + gamma*V(S') - V(S) -- for computing grad steps
 
+# episode counter
+episodes = tf.Variable(0.0, trainable=False, name='episodes')
+episode_inc_op = episodes.assign_add(1)
+
 # actor network
 with tf.variable_scope('actor', reuse=False):
 	actor_hidden = tf.layers.dense(state_ph, h_actor, activation = tf.nn.relu)
@@ -68,14 +78,33 @@ with tf.variable_scope('actor', reuse=False):
 	actor_policy = tf.nn.softmax(actor_logits)
 	actor_logprob_action = actor_logits[action_ph] - tf.reduce_logsumexp(actor_logits)
 
+# need a function so that we can create the same graph (but with different weights) for normal critic, and
+# the slowly-changing critic used as a target
+def generate_critic_network(s, trainable):
+	critic_hidden = tf.layers.dense(s, h_critic, activation = tf.nn.relu, trainable = trainable)
+	critic_value = tf.squeeze(tf.layers.dense(critic_hidden, 1, trainable = trainable))
+	return critic_value
+
 # critic network
 with tf.variable_scope('critic', reuse=False):
-	critic_hidden = tf.layers.dense(state_ph, h_critic, activation = tf.nn.relu)
-	critic_value = tf.squeeze(tf.layers.dense(critic_hidden, 1))
+	critic_value = generate_critic_network(state_ph, trainable = True)
+
+# slowly-changing critic network (for targets)
+with tf.variable_scope('slow_critic', reuse=False):
+	critic_value_slow = generate_critic_network(state_ph, trainable = False)
 
 # isolate vars for each network
 actor_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
 critic_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic')
+slow_critic_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='slow_critic')
+
+# update values for slowly-changing critic network to match current critic network
+update_slow_critic_ops = []
+for i, slow_critic_var in enumerate(slow_critic_vars):
+	update_slow_critic_op = slow_critic_var.assign(critic_vars[i])
+	update_slow_critic_ops.append(update_slow_critic_op)
+
+update_slow_critic_op = tf.group(*update_slow_critic_ops, name='update_slow_critic')
 
 # gradients
 actor_logprob_action_grads = tf.gradients(actor_logprob_action, actor_vars)
@@ -107,15 +136,19 @@ for network in ac_update_inputs: # actor and critic
 	net_update_inputs = ac_update_inputs[network]
 	with tf.variable_scope(network+'/traces'):
 		for var, grad in zip(net_update_inputs['vars'], net_update_inputs['grads']):
+			
 			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
 			# Elig trace update: e <- gamma*lambda*e + grad
 			trace_op = trace.assign(gamma * net_update_inputs['lambda_'] * trace + 
 				tf.clip_by_norm(grad, clip_norm = clip_norm))
-			grad_step_op = var.assign_add(net_update_inputs['lr'] * delta_ph * trace_op)
+
+			lr = net_update_inputs['lr'] * lr_decay**episodes
+
+			grad_step_op = var.assign_add(lr * delta_ph * trace_op)
 
 			grad_step_sanity_checks.append(
-				tf.norm(net_update_inputs['lr'] * delta_ph * trace) / 
-				tf.norm(var - net_update_inputs['lr'] * delta_ph * trace))
+				tf.norm(lr * delta_ph * trace) / 
+				tf.norm(var - lr * delta_ph * trace))
 			grad_norms.append(tf.norm(grad))
 			grad_max_vals.append(tf.reduce_max(tf.abs(grad)))
 			
@@ -133,9 +166,7 @@ sess.run(tf.global_variables_initializer())
 #####################################################################################################
 ## Training
 
-# num episodes, max steps per episode
-# per ep: running reward, eligibility traces, state
-# render
+total_steps = 0
 for ep in range(num_episodes):
 
 	print('-------------------------------- START OF EPISODE ----------------------------------')
@@ -156,7 +187,7 @@ for ep in range(num_episodes):
 
 	# Initial state
 	observation = env.reset()
-	env.render()
+	# env.render()
 
 	for t in range(max_steps_ep):
 
@@ -169,14 +200,20 @@ for ep in range(num_episodes):
 
 		# take step
 		next_observation, reward, done, _info = env.step(action)
-		env.render()
+		# env.render()
 		total_reward += reward*(gamma**t)
+
+		# update the slow critic's weights to match the latest critic if it's time to do so
+		if total_steps%update_slow_critic_every == 0:
+			_ = sess.run(update_slow_critic_op)
 
 		# compute value of next state
 		if done and not env.env._past_limit(): # only consider next state the end state if it wasn't due to timeout
 			next_state_value = 0
-		else:
+		elif total_steps < slow_critic_burnin: # don't use the slowly-changing critic just yet
 			next_state_value = sess.run(critic_value, feed_dict={state_ph: next_observation[None]})
+		else: # use a slowly-changing critic for the target to improve training stability
+			next_state_value = sess.run(critic_value_slow, feed_dict={state_ph: next_observation[None]})
 
 		# compute TD error
 		delta = reward + gamma*next_state_value - state_value
@@ -201,21 +238,24 @@ for ep in range(num_episodes):
 			gmvs.append('%7.3f'%(max(gmv)))
 
 		observation = next_observation
-		if done: break
+		total_steps += 1
+		if done: 
+			_ = sess.run(episode_inc_op)
+			break
 
 	print('Episode %2i, Reward: %7.3f'%(ep,total_reward))
-	ts.append('%7.3f'%(t))
-	print(ts)
+	# ts.append('%7.3f'%(t))
+	# print(ts)
 	vs.append('%7.3f'%(state_value))
 	print(vs)
-	deltas.append('%7.3f'%(delta))
-	print(deltas)
-	ss.append('%7.3f'%(max(np.abs(sanity))))
-	print(ss)
-	gns.append('%7.3f'%(max(gn)))
-	print(gns)
-	gmvs.append('%7.3f'%(max(gmv)))
-	print(gmvs)
+	# deltas.append('%7.3f'%(delta))
+	# print(deltas)
+	# ss.append('%7.3f'%(max(np.abs(sanity))))
+	# print(ss)
+	# gns.append('%7.3f'%(max(gn)))
+	# print(gns)
+	# gmvs.append('%7.3f'%(max(gmv)))
+	# print(gmvs)
 	print('-------------------------------- END OF EPISODE ----------------------------------')
 
 
@@ -226,8 +266,11 @@ gym.upload(outdir)
 
 
 
-# nan rewards => gradient clipping, delayed critic for target (in delta)
+# nan rewards => 
+	# gradient clipping
+	# delayed critic for target (in delta)
+	# lr decay
 # shared parameters between actor and critic
 # regularization: dropout, L2
 
-# should there be 0 V(s') award when you finish succesfully?
+	# should there be 0 V(s') award when you finish succesfully?
