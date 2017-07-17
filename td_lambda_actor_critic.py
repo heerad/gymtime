@@ -152,9 +152,6 @@ ac_update_inputs = dict(
 # gradient step ops with eligibility traces
 gradient_step_ops = []
 trace_reset_ops = []
-# grad_step_sanity_checks = []
-# grad_norms = []
-# grad_max_vals = []
 for network in ac_update_inputs: # actor and critic
 	net_update_inputs = ac_update_inputs[network]
 	with tf.variable_scope(network+'/traces'):
@@ -171,12 +168,6 @@ for network in ac_update_inputs: # actor and critic
 
 			# Gradient step, including for L2 regularization
 			grad_step_op = var.assign_add(lr * (delta_ph*trace_op - l2_reg*var))
-
-			# grad_step_sanity_checks.append(
-			# 	tf.norm(lr *delta_ph * trace) / 
-			# 	tf.norm(var - lr * delta_ph * trace))
-			# grad_norms.append(tf.norm(grad))
-			# grad_max_vals.append(tf.reduce_max(tf.abs(grad)))
 			
 			trace_reset_op = trace.assign(tf.zeros(trace.get_shape()))
 			gradient_step_ops.append(grad_step_op)
@@ -204,16 +195,11 @@ for ep in range(num_episodes):
 	_ = sess.run(trace_reset_op)
 
 	# # Track TD errors and state values for logging
-	# ts = []
 	vs = []
-	# deltas = []
-	# ss = []
-	# gns = []
-	# gmvs = []
 
 	# Initial state
 	observation = env.reset()
-	# env.render()
+	env.render()
 
 	for t in range(max_steps_ep):
 
@@ -221,12 +207,15 @@ for ep in range(num_episodes):
 		state_value, action_probs = sess.run([critic_value, actor_policy], 
 			feed_dict={state_ph: observation[None], training_actor: False})
 
+		# track (estimated) state values over time
+		vs.append('%7.3f'%(state_value))
+
 		# get action
 		action = np.random.choice(n_actions, p=action_probs)
 
 		# take step
 		next_observation, reward, done, _info = env.step(action)
-		# env.render()
+		env.render()
 		total_reward += reward*(gamma**t)
 
 		# update the slow critic's weights to match the latest critic if it's time to do so
@@ -243,40 +232,18 @@ for ep in range(num_episodes):
 
 		# compute TD error
 		delta = reward + gamma*next_state_value - state_value
-		if t%1==0:
-		# 	ts.append('%7.3f'%(t)) 
-			vs.append('%7.3f'%(state_value))
-		# 	deltas.append('%7.3f'%(delta))
 
 		# update actor and critic params using TD(lambda)
 		_ = sess.run(td_lambda_op,
 			feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta, training_actor: True})
-
-		# sanity = sess.run(grad_step_sanity_checks, 
-		# 		feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta})
-		# gn = sess.run(grad_norms, 
-		# 		feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta})
-		# gmv = sess.run(grad_max_vals, 
-		# 		feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta})
-		# if t%1==0:
-		# 	ss.append('%7.3f'%(max(np.abs(sanity))))
-		# 	gns.append('%7.3f'%(max(gn)))
-		# 	gmvs.append('%7.3f'%(max(gmv)))
-
 		observation = next_observation
 		total_steps += 1
 		if done: 
 			_ = sess.run(episode_inc_op)
 			break
 
-	print('Episode %2i, Reward: %7.3f'%(ep,total_reward))
-	# ts.append('%7.3f'%(t))
-	# print(ts)
+	print('Episode %2i, Reward: %7.3f, State values below:'%(ep,total_reward))
 	print(vs)
-	# print(deltas)
-	# print(ss)
-	# print(gns)
-	# print(gmvs)
 	print('-------------------------------- END OF EPISODE ----------------------------------')
 
 
@@ -284,15 +251,3 @@ for ep in range(num_episodes):
 writefile('info.json', json.dumps(info))
 env.close()
 gym.upload(outdir)
-
-
-	# should there be 0 V(s') award when you finish succesfully?
-	# gradient clipping
-	# delayed critic for target (in delta)
-	# lr decay
-	# l2 reg
-	# dropout
-# shared parameters between actor and critic
-# Adam/Rmsprop
-# TRPO
-# DDPG
