@@ -73,6 +73,7 @@ tf.reset_default_graph()
 state_ph = tf.placeholder(dtype=tf.float32, shape=[1,state_dim]) # Needs to be rank >=2
 action_ph = tf.placeholder(dtype=tf.int32, shape=()) # for computing policy gradient for action taken
 delta_ph = tf.placeholder(dtype=tf.float32, shape=()) # R + gamma*V(S') - V(S) -- for computing grad steps
+training_actor = tf.placeholder(dtype=tf.bool, shape=()) # determines how to handle dropout in the actor
 
 # episode counter
 episodes = tf.Variable(0.0, trainable=False, name='episodes')
@@ -81,7 +82,7 @@ episode_inc_op = episodes.assign_add(1)
 # actor network
 with tf.variable_scope('actor', reuse=False):
 	actor_hidden = tf.layers.dense(state_ph, h_actor, activation = tf.nn.relu)
-	actor_hidden_drop = tf.layers.dropout(actor_hidden, rate = dropout_actor, training = True)
+	actor_hidden_drop = tf.layers.dropout(actor_hidden, rate = dropout_actor, training = training_actor)
 	actor_logits = tf.squeeze(tf.layers.dense(actor_hidden_drop, n_actions))
 	actor_logits -= tf.reduce_max(actor_logits) # for numerical stability
 	actor_policy = tf.nn.softmax(actor_logits)
@@ -208,7 +209,7 @@ for ep in range(num_episodes):
 
 		# compute value of current state and action probabilities
 		state_value, action_probs = sess.run([critic_value, actor_policy], 
-			feed_dict={state_ph: observation[None]})
+			feed_dict={state_ph: observation[None], training_actor: False})
 
 		# get action
 		action = np.random.choice(n_actions, p=action_probs)
@@ -239,7 +240,7 @@ for ep in range(num_episodes):
 
 		# update actor and critic params using TD(lambda)
 		_ = sess.run(td_lambda_op,
-			feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta})
+			feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta, training_actor: True})
 
 		# sanity = sess.run(grad_step_sanity_checks, 
 		# 		feed_dict={state_ph: observation[None], action_ph: action, delta_ph: delta})
