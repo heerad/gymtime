@@ -18,22 +18,24 @@ from os import path
 #####################################################################################################
 ## Setup
 
-env_to_use = 'LunarLander-v2'
+env_to_use = 'CartPole-v0'
 
 # hyperparameters
 gamma = 1.				# reward discount factor
 lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
 lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
-h_actor = 8				# hidden layer size for actor
-h_critic = 8			# hidden layer size for critic
-lr_actor = 1e-4			# learning rate for actor
-lr_critic = 1e-4		# learning rate for critic
-lr_decay = 1			# learning rate decay (per episode)
-l2_reg_actor = 0		# L2 regularization factor for actor
-l2_reg_critic = 0		# L2 regularization factor for critic
-dropout_actor = 0.		# dropout rate for actor (0 = no dropout)
-dropout_critic = 0.		# dropout rate for critic (0 = no dropout)
-num_episodes = 5000		# number of episodes
+h_actor = 32			# hidden layer size for actor
+h_critic = 32			# hidden layer size for critic
+lr_actor = 1e-3			# learning rate for actor
+lr_critic = 1e-3		# learning rate for critic
+lr_decay = 0.99			# learning rate decay (per episode)
+rmsprop_decay = 0.99	# Decay rate for RMSProp optimization procedure
+rmsprop_eps = 1e-7		# Epsilon for RMSProp optimization procedure
+l2_reg_actor = 1e-7		# L2 regularization factor for actor
+l2_reg_critic = 1e-7	# L2 regularization factor for critic
+dropout_actor = 0		# dropout rate for actor (0 = no dropout)
+dropout_critic = 0		# dropout rate for critic (0 = no dropout)
+num_episodes = 1000		# number of episodes
 max_steps_ep = 1000		# default max number of steps per episode (unless env has a lower hardcoded limit)
 clip_norm = 10			# maximum gradient norm for clipping
 slow_critic_burnin = 100		# number of steps where slow critic weights are tied to critic weights
@@ -64,6 +66,7 @@ info['params'] = dict(
 	lr_actor = lr_actor,
 	lr_critic = lr_critic,
 	lr_decay = lr_decay,
+	rmsprop_decay = rmsprop_decay,
 	l2_reg_actor = l2_reg_actor,
 	l2_reg_critic = l2_reg_critic,
 	dropout_actor = dropout_actor,
@@ -162,12 +165,20 @@ for network in ac_update_inputs: # actor and critic
 			if 'bias' in var.name: l2_reg = 0	# don't regularize biases
 			lambda_ = net_update_inputs['lambda_']
 			
-			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
 			# Elig trace update: e <- gamma*lambda*e + grad
+			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
 			trace_op = trace.assign(gamma*lambda_*trace + tf.clip_by_norm(grad, clip_norm = clip_norm))
 
+			# Collect total gradient (objective function + regularization)
+			grad_tot = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='grad_tot')
+			grad_tot_op = grad_tot.assign(delta_ph*trace_op - l2_reg*var)
+
+			# RMSProp cache update: c <- decay*c + (1-decay)*dX^2
+			cache = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='cache')
+			cache_op = cache.assign(rmsprop_decay*cache + (1-rmsprop_decay)*tf.square(grad_tot_op))
+
 			# Gradient step, including for L2 regularization
-			grad_step_op = var.assign_add(lr * (delta_ph*trace_op - l2_reg*var))
+			grad_step_op = var.assign_add(lr * grad_tot / tf.sqrt(cache_op + rmsprop_eps))
 			
 			trace_reset_op = trace.assign(tf.zeros(trace.get_shape()))
 			gradient_step_ops.append(grad_step_op)
@@ -199,7 +210,7 @@ for ep in range(num_episodes):
 
 	# Initial state
 	observation = env.reset()
-	env.render()
+	# env.render()
 
 	for t in range(max_steps_ep):
 
@@ -215,7 +226,7 @@ for ep in range(num_episodes):
 
 		# take step
 		next_observation, reward, done, _info = env.step(action)
-		env.render()
+		# env.render()
 		total_reward += reward*(gamma**t)
 
 		# update the slow critic's weights to match the latest critic if it's time to do so
