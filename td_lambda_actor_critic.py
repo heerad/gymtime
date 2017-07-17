@@ -14,28 +14,29 @@ from os import path
 # Neural networks are used for function approximation.
 # A slowly-changing "target" critic network, as well as gradient norm clipping, are used to improve
 # stability and encourage convergence.
+# Parameter updates are made via RMSProp.
 
 #####################################################################################################
 ## Setup
 
-env_to_use = 'CartPole-v0'
+env_to_use = 'LunarLander-v2'
 
 # hyperparameters
 gamma = 1.				# reward discount factor
 lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
 lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
-h_actor = 32			# hidden layer size for actor
-h_critic = 32			# hidden layer size for critic
-lr_actor = 1e-3			# learning rate for actor
-lr_critic = 1e-3		# learning rate for critic
-lr_decay = 0.99			# learning rate decay (per episode)
+h_actor = 16			# hidden layer size for actor
+h_critic = 16			# hidden layer size for critic
+lr_actor = 3e-4			# learning rate for actor
+lr_critic = 3e-4		# learning rate for critic
+lr_decay = 0.999		# learning rate decay (per episode)
 rmsprop_decay = 0.99	# Decay rate for RMSProp optimization procedure
 rmsprop_eps = 1e-7		# Epsilon for RMSProp optimization procedure
 l2_reg_actor = 1e-7		# L2 regularization factor for actor
 l2_reg_critic = 1e-7	# L2 regularization factor for critic
 dropout_actor = 0		# dropout rate for actor (0 = no dropout)
 dropout_critic = 0		# dropout rate for critic (0 = no dropout)
-num_episodes = 1000		# number of episodes
+num_episodes = 5000		# number of episodes
 max_steps_ep = 1000		# default max number of steps per episode (unless env has a lower hardcoded limit)
 clip_norm = 10			# maximum gradient norm for clipping
 slow_critic_burnin = 100		# number of steps where slow critic weights are tied to critic weights
