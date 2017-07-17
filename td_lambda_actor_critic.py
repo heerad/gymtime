@@ -6,6 +6,16 @@ import json, sys, os
 from os import path
 
 #####################################################################################################
+## Algorithm
+
+# TD(\lambda) Actor-Critic
+# A policy gradient algorithm that uses "backward view" TD(\lambda) for updating the actor and critic
+# via eligibility traces in an online fashion (per time-step rather than episode).
+# Neural networks are used for function approximation.
+# A slowly-changing "target" critic network, as well as gradient norm clipping, are used to improve
+# stability and encourage convergence.
+
+#####################################################################################################
 ## Setup
 
 env_to_use = 'LunarLander-v2'
@@ -39,7 +49,7 @@ env.seed(0)
 np.random.seed(0)
 
 # prepare monitorings
-outdir = '/tmp/td_lambda_ac-agent-results'
+outdir = '/tmp/td_lambda_actor_critic-agent-results'
 env = wrappers.Monitor(env, outdir, force=True)
 def writefile(fname, s):
     with open(path.join(outdir, fname), 'w') as fh: fh.write(s)
