@@ -68,6 +68,7 @@ info['params'] = dict(
 	lr_critic = lr_critic,
 	lr_decay = lr_decay,
 	rmsprop_decay = rmsprop_decay,
+	rmsprop_eps = rmsprop_eps,
 	l2_reg_actor = l2_reg_actor,
 	l2_reg_critic = l2_reg_critic,
 	dropout_actor = dropout_actor,
