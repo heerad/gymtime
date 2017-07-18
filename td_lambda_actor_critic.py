@@ -29,7 +29,8 @@ h_actor = 32			# hidden layer size for actor
 h_critic = 32			# hidden layer size for critic
 lr_actor = 1e-3			# learning rate for actor
 lr_critic = 1e-3		# learning rate for critic
-lr_decay = 0.999			# learning rate decay (per episode)
+lr_decay = 0.999		# learning rate decay (per episode)
+use_rmsprop = True 		# whether to use RMSprop or SGD
 rmsprop_decay = 0.99	# Decay rate for RMSProp optimization procedure
 rmsprop_eps = 1e-7		# Epsilon for RMSProp optimization procedure
 l2_reg_actor = 0		# L2 regularization factor for actor
@@ -67,6 +68,7 @@ info['params'] = dict(
 	lr_actor = lr_actor,
 	lr_critic = lr_critic,
 	lr_decay = lr_decay,
+	use_rmsprop = use_rmsprop,
 	rmsprop_decay = rmsprop_decay,
 	rmsprop_eps = rmsprop_eps,
 	l2_reg_actor = l2_reg_actor,
@@ -171,16 +173,21 @@ for network in ac_update_inputs: # actor and critic
 			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
 			trace_op = trace.assign(gamma*lambda_*trace + tf.clip_by_norm(grad, clip_norm = clip_norm))
 
-			# Collect total gradient (objective function + regularization)
-			grad_tot = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='grad_tot')
-			grad_tot_op = grad_tot.assign(delta_ph*trace_op - l2_reg*var)
+			if use_rmsprop:
+				# Collect total gradient (objective function + regularization)
+				grad_tot = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='grad_tot')
+				grad_tot_op = grad_tot.assign(delta_ph*trace_op - l2_reg*var)
 
-			# RMSProp cache update: c <- decay*c + (1-decay)*dX^2
-			cache = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='cache')
-			cache_op = cache.assign(rmsprop_decay*cache + (1-rmsprop_decay)*tf.square(grad_tot_op))
+				# RMSProp cache update: c <- decay*c + (1-decay)*dX^2
+				cache = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='cache')
+				cache_op = cache.assign(rmsprop_decay*cache + (1-rmsprop_decay)*tf.square(grad_tot_op))
 
-			# RMSProp step
-			grad_step_op = var.assign_add(lr * grad_tot / tf.sqrt(cache_op + rmsprop_eps))
+				# RMSProp step
+				grad_step_op = var.assign_add(lr * grad_tot / tf.sqrt(cache_op + rmsprop_eps))
+
+			else:
+				# Gradient step, including for L2 regularization
+				grad_step_op = var.assign_add(lr * (delta_ph*trace_op - l2_reg*var))
 			
 			# Need to reset eligibility traces every episode
 			trace_reset_op = trace.assign(tf.zeros(trace.get_shape()))
