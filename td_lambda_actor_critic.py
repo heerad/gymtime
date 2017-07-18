@@ -23,14 +23,14 @@ env_to_use = 'LunarLander-v2'
 
 # hyperparameters
 gamma = 1.				# reward discount factor
-lambda_actor = 0.8		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
-lambda_critic = 0.8		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
-h_actor = 32			# hidden layer size for actor
-h_critic = 32			# hidden layer size for critic
-lr_actor = 1e-3			# learning rate for actor
-lr_critic = 1e-3		# learning rate for critic
-lr_decay = 0.999		# learning rate decay (per episode)
-use_rmsprop = True 		# whether to use RMSprop or SGD
+lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
+lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
+h_actor = 8				# hidden layer size for actor
+h_critic = 8			# hidden layer size for critic
+lr_actor = 1e-4			# learning rate for actor
+lr_critic = 1e-4		# learning rate for critic
+lr_decay = 1			# learning rate decay (per episode)
+use_rmsprop = False 	# whether to use RMSprop or SGD
 rmsprop_decay = 0.99	# Decay rate for RMSProp optimization procedure
 rmsprop_eps = 1e-7		# Epsilon for RMSProp optimization procedure
 l2_reg_actor = 0		# L2 regularization factor for actor
