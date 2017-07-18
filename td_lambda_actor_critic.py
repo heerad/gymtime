@@ -25,8 +25,9 @@ env_to_use = 'LunarLander-v2'
 gamma = 1.				# reward discount factor
 lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
 lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
-h_actor = 8				# hidden layer size for actor
-h_critic = 8			# hidden layer size for critic
+lambda_decay = 0.9996	# \lambda decay (per episode)	
+h_actor = 32			# hidden layer size for actor
+h_critic = 32			# hidden layer size for critic
 lr_actor = 1e-4			# learning rate for actor
 lr_critic = 1e-4		# learning rate for critic
 lr_decay = 1			# learning rate decay (per episode)
@@ -37,11 +38,11 @@ l2_reg_actor = 0		# L2 regularization factor for actor
 l2_reg_critic = 0		# L2 regularization factor for critic
 dropout_actor = 0		# dropout rate for actor (0 = no dropout)
 dropout_critic = 0		# dropout rate for critic (0 = no dropout)
-num_episodes = 5000		# number of episodes
-max_steps_ep = 1000		# default max number of steps per episode (unless env has a lower hardcoded limit)
-clip_norm = 100			# maximum gradient norm for clipping
+num_episodes = 15000	# number of episodes
+max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
+clip_norm = 10			# maximum gradient norm for clipping
 slow_critic_burnin = 100		# number of steps where slow critic weights are tied to critic weights
-update_slow_critic_every = 10	# number of steps to use slow critic as target before updating it to latest critic
+update_slow_critic_every = 20	# number of steps to use slow critic as target before updating it to latest critic
 
 # game parameters
 env = gym.make(env_to_use)
@@ -167,7 +168,7 @@ for network in ac_update_inputs: # actor and critic
 			lr = net_update_inputs['lr'] * lr_decay**episodes
 			l2_reg = net_update_inputs['l2_reg']
 			if 'bias' in var.name: l2_reg = 0	# don't regularize biases
-			lambda_ = net_update_inputs['lambda_']
+			lambda_ = net_update_inputs['lambda_'] * lr_decay**episodes
 			
 			# Elig trace update: e <- gamma*lambda*e + grad
 			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
@@ -209,12 +210,10 @@ sess.run(tf.global_variables_initializer())
 total_steps = 0
 for ep in range(num_episodes):
 
-	print('-------------------------------- START OF EPISODE ----------------------------------')
-
 	total_reward = 0
 
 	# # Track TD errors and state values for logging
-	vs = []
+	steps_in_ep = 0
 
 	# Initial state
 	observation = env.reset()
@@ -225,9 +224,6 @@ for ep in range(num_episodes):
 		# compute value of current state and action probabilities
 		state_value, action_probs = sess.run([critic_value, actor_policy], 
 			feed_dict={state_ph: observation[None], training_actor: False})
-
-		# track (estimated) state values over time
-		vs.append('%7.3f'%(state_value))
 
 		# get action
 		action = np.random.choice(n_actions, p=action_probs)
@@ -258,6 +254,7 @@ for ep in range(num_episodes):
 		
 		observation = next_observation
 		total_steps += 1
+		steps_in_ep += 1
 		
 		if done: 
 			# Reset eligibility traces to 0
@@ -266,10 +263,7 @@ for ep in range(num_episodes):
 			_ = sess.run(episode_inc_op)
 			break
 
-	print('Episode %2i, Reward: %7.3f, State values below:'%(ep,total_reward))
-	print(vs)
-	print('-------------------------------- END OF EPISODE ----------------------------------')
-
+	print('Episode %2i, Reward: %7.3f, Steps: %i'%(ep,total_reward,steps_in_ep))
 
 # Finalize and upload results
 writefile('info.json', json.dumps(info))
