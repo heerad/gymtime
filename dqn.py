@@ -22,25 +22,25 @@ from collections import deque
 #####################################################################################################
 ## Setup
 
-env_to_use = 'LunarLander-v2'
+env_to_use = 'CartPole-v0'
 
 # hyperparameters
 gamma = 1.				# reward discount factor
-h = 32					# hidden layer size
+h = 8					# hidden layer size
 lr = 1e-3				# learning rate
 lr_decay = 0.999		# learning rate decay (per episode)
 l2_reg = 0				# L2 regularization factor
 dropout = 0				# dropout rate (0 = no dropout)
-num_episodes = 15000	# number of episodes
+num_episodes = 500	# number of episodes
 max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
-slow_target_burnin = 1e4		# number of steps where slow target weights are tied to current network weights
-update_slow_target_every = 1e3	# number of steps to use slow target as target before updating it to latest weights
+slow_target_burnin = 1e3		# number of steps where slow target weights are tied to current network weights
+update_slow_target_every = 1e2	# number of steps to use slow target as target before updating it to latest weights
 train_every = 1			# number of steps to run the policy (and collect experience) before updating network weights
 replay_memory_capacity = 2**20	# capacity of experience replay memory
 minibatch_size = 2**8	# size of minibatch from experience replay memory for updates
 epsilon_start = 1.0		# probability of random action at start
-epsilon_end = 0.1		# minimum probability of random action
-epsilon_decay_length = 1e5		# number of steps over which to linearly decay epsilon
+epsilon_end = 0.05		# minimum probability of random action
+epsilon_decay_length = 1e3		# number of steps over which to linearly decay epsilon
 
 # game parameters
 env = gym.make(env_to_use)
