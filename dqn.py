@@ -95,22 +95,24 @@ episodes = tf.Variable(0.0, trainable=False, name='episodes')
 episode_inc_op = episodes.assign_add(1)
 
 # will use this to initialize both Q network and slowly-changing target network with same structure
-def generate_network(s, trainable):
-	hidden = tf.layers.dense(s, h, activation = tf.nn.relu, trainable = trainable)
+def generate_network(s, trainable, reuse):
+	hidden = tf.layers.dense(s, h, activation = tf.nn.relu, trainable = trainable, name = 'dense', reuse = reuse)
 	hidden_drop = tf.layers.dropout(hidden, rate = dropout, training = trainable & is_training_ph)
-	hidden_2 = tf.layers.dense(hidden_drop, h, activation = tf.nn.relu, trainable = trainable)
+	hidden_2 = tf.layers.dense(hidden_drop, h, activation = tf.nn.relu, trainable = trainable, name = 'dense_1', reuse = reuse)
 	hidden_drop_2 = tf.layers.dropout(hidden_2, rate = dropout, training = trainable & is_training_ph)
-	action_values = tf.squeeze(tf.layers.dense(hidden_drop_2, n_actions, trainable = trainable))
+	action_values = tf.squeeze(tf.layers.dense(hidden_drop_2, n_actions, trainable = trainable, name = 'dense_2', reuse = reuse))
 	return action_values
 
-# Q network
-with tf.variable_scope('q_network', reuse=False):
-	q_action_values = generate_network(state_ph, trainable = True)
+with tf.variable_scope('q_network') as scope:
+	# Q network applied to state_ph
+	q_action_values = generate_network(state_ph, trainable = True, reuse = False)
+	# Q network applied to next_state_ph (for double Q learning)
+	q_action_values_next = tf.stop_gradient(generate_network(next_state_ph, trainable = False, reuse = True))
 
 # slow target network
 with tf.variable_scope('slow_target_network', reuse=False):
 	# use stop_gradient to treat the output values as constant targets when doing backprop
-	slow_target_action_values = tf.stop_gradient(generate_network(next_state_ph, trainable = False))
+	slow_target_action_values = tf.stop_gradient(generate_network(next_state_ph, trainable = False, reuse = False))
 
 # isolate vars for each network
 q_network_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='q_network')
@@ -125,9 +127,13 @@ for i, slow_target_var in enumerate(slow_target_network_vars):
 update_slow_target_op = tf.group(*update_slow_target_ops, name='update_slow_target')
 
 # Q-learning targets y_i for (s,a) from experience replay
-# = r_i + gamma*max_{a}(Q_slow(s',a)) if s' is not terminal
+# = r_i + gamma*Q_slow(s',argmax_{a}Q(s',a)) if s' is not terminal
 # = r_i if s' terminal
-targets = reward_ph + is_not_terminal_ph * gamma * tf.reduce_max(slow_target_action_values, axis=1)
+# targets = reward_ph + is_not_terminal_ph * gamma * tf.reduce_max(slow_target_action_values, axis=1)
+# Note that we're using Q_slow(s',argmax_{a}Q(s',a)) instead of max_{a}Q_slow(s',a) to address the maximization bias problem via Double Q-Learning
+targets = reward_ph + is_not_terminal_ph * gamma * \
+	tf.gather_nd(slow_target_action_values, tf.stack((tf.range(minibatch_size), tf.cast(tf.argmax(q_action_values_next, axis=1), tf.int32)), axis=1))
+
 # Estimated Q values for (s,a) from experience replay
 estim_taken_action_vales = tf.gather_nd(q_action_values, tf.stack((tf.range(minibatch_size), action_ph), axis=1))
 
