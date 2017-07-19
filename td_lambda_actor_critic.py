@@ -211,8 +211,6 @@ total_steps = 0
 for ep in range(num_episodes):
 
 	total_reward = 0
-
-	# # Track TD errors and state values for logging
 	steps_in_ep = 0
 
 	# Initial state
