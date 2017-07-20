@@ -248,7 +248,7 @@ for ep in range(num_episodes):
 		# take step
 		next_observation, reward, done, _info = env.step(action)
 		# env.render()
-		total_reward += reward*(gamma**t)
+		total_reward += reward
 
 		# update the slow critic's weights to match the latest critic if it's time to do so
 		if total_steps%update_slow_critic_every == 0:
