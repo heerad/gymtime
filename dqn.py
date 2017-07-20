@@ -22,25 +22,27 @@ from collections import deque
 #####################################################################################################
 ## Setup
 
-env_to_use = 'LunarLander-v2'
+env_to_use = 'CartPole-v1'
 
 # hyperparameters
 gamma = 1				# reward discount factor
-h = 256					# hidden layer size
-lr = 1e-4				# learning rate
-lr_decay = 1			# learning rate decay (per episode)
-l2_reg = 1e-7				# L2 regularization factor
+h1 = 32					# hidden layer 1 size
+h2 = 32					# hidden layer 2 size
+h3 = 32					# hidden layer 3 size
+lr = 1e-3				# learning rate
+lr_decay = 0.99			# learning rate decay (per episode)
+l2_reg = 0				# L2 regularization factor
 dropout = 0				# dropout rate (0 = no dropout)
-num_episodes = 5000		# number of episodes
+num_episodes = 500		# number of episodes
 max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
-slow_target_burnin = 1e4		# number of steps where slow target weights are tied to current network weights
-update_slow_target_every = 1e2	# number of steps to use slow target as target before updating it to latest weights
+slow_target_burnin = 1000		# number of steps where slow target weights are tied to current network weights
+update_slow_target_every = 100	# number of steps to use slow target as target before updating it to latest weights
 train_every = 1			# number of steps to run the policy (and collect experience) before updating network weights
 replay_memory_capacity = int(1e5)	# capacity of experience replay memory
-minibatch_size = 1024	# size of minibatch from experience replay memory for updates
+minibatch_size = 512	# size of minibatch from experience replay memory for updates
 epsilon_start = 1.0		# probability of random action at start
 epsilon_end = 0.05		# minimum probability of random action after linear decay period
-epsilon_decay_length = 1e5		# number of steps over which to linearly decay epsilon
+epsilon_decay_length = 1e4		# number of steps over which to linearly decay epsilon
 epsilon_decay_exp = 0.97	# exponential decay rate after reaching epsilon_end (per episode)
 
 # game parameters
@@ -61,7 +63,9 @@ info = {}
 info['env_id'] = env.spec.id
 info['params'] = dict(
 	gamma = gamma,
-	h = h,
+	h1 = h1,
+	h2 = h2,
+	h3 = h3,
 	lr = lr,
 	lr_decay = lr_decay,
 	l2_reg = l2_reg,
@@ -98,11 +102,11 @@ episode_inc_op = episodes.assign_add(1)
 
 # will use this to initialize both Q network and slowly-changing target network with same structure
 def generate_network(s, trainable, reuse):
-	hidden = tf.layers.dense(s, h, activation = tf.nn.relu, trainable = trainable, name = 'dense', reuse = reuse)
+	hidden = tf.layers.dense(s, h1, activation = tf.nn.relu, trainable = trainable, name = 'dense', reuse = reuse)
 	hidden_drop = tf.layers.dropout(hidden, rate = dropout, training = trainable & is_training_ph)
-	hidden_2 = tf.layers.dense(hidden_drop, h, activation = tf.nn.relu, trainable = trainable, name = 'dense_1', reuse = reuse)
+	hidden_2 = tf.layers.dense(hidden_drop, h2, activation = tf.nn.relu, trainable = trainable, name = 'dense_1', reuse = reuse)
 	hidden_drop_2 = tf.layers.dropout(hidden_2, rate = dropout, training = trainable & is_training_ph)
-	hidden_3 = tf.layers.dense(hidden_drop_2, h, activation = tf.nn.relu, trainable = trainable, name = 'dense_2', reuse = reuse)
+	hidden_3 = tf.layers.dense(hidden_drop_2, h3, activation = tf.nn.relu, trainable = trainable, name = 'dense_2', reuse = reuse)
 	hidden_drop_3 = tf.layers.dropout(hidden_3, rate = dropout, training = trainable & is_training_ph)
 	action_values = tf.squeeze(tf.layers.dense(hidden_drop_3, n_actions, trainable = trainable, name = 'dense_3', reuse = reuse))
 	return action_values
@@ -145,7 +149,7 @@ estim_taken_action_vales = tf.gather_nd(q_action_values, tf.stack((tf.range(mini
 loss = tf.reduce_mean(tf.square(targets - estim_taken_action_vales))
 for var in q_network_vars:
 	if not 'bias' in var.name:
-		loss += l2_reg * 0.5 * tf.reduce_sum(tf.square(var))
+		loss += l2_reg * 0.5 * tf.nn.l2_loss(var)
 
 # optimizer
 train_op = tf.train.AdamOptimizer(lr*lr_decay**episodes).minimize(loss)

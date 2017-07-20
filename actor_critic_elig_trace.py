@@ -8,7 +8,7 @@ from os import path
 #####################################################################################################
 ## Algorithm
 
-# TD(\lambda) Actor-Critic
+# Actor-Critic with eligibility traces
 # A policy gradient algorithm that uses "backward view" TD(\lambda) for updating the actor and critic
 # via eligibility traces in an online fashion (per time-step rather than episode).
 # Neural networks are used for function approximation.
@@ -19,15 +19,18 @@ from os import path
 #####################################################################################################
 ## Setup
 
-env_to_use = 'LunarLander-v2'
+env_to_use = 'MountainCar-v0'
 
 # hyperparameters
 gamma = 1.				# reward discount factor
 lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
 lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
-lambda_decay = 0.9996	# \lambda decay (per episode)	
-h_actor = 32			# hidden layer size for actor
-h_critic = 32			# hidden layer size for critic
+h1_actor = 32			# hidden layer 1 size for actor
+h2_actor = 32			# hidden layer 2 size for actor
+h3_actor = 32			# hidden layer 3 size for actor
+h1_critic = 32			# hidden layer 1 size for critic
+h2_critic = 32			# hidden layer 2 size for critic
+h3_critic = 32			# hidden layer 3 size for critic
 lr_actor = 1e-4			# learning rate for actor
 lr_critic = 1e-4		# learning rate for critic
 lr_decay = 1			# learning rate decay (per episode)
@@ -40,9 +43,9 @@ dropout_actor = 0		# dropout rate for actor (0 = no dropout)
 dropout_critic = 0		# dropout rate for critic (0 = no dropout)
 num_episodes = 15000	# number of episodes
 max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
-clip_norm = 10			# maximum gradient norm for clipping
-slow_critic_burnin = 100		# number of steps where slow critic weights are tied to critic weights
-update_slow_critic_every = 20	# number of steps to use slow critic as target before updating it to latest critic
+clip_norm = 100			# maximum gradient norm for clipping
+slow_critic_burnin = 1000		# number of steps where slow critic weights are tied to critic weights
+update_slow_critic_every = 1000	# number of steps to use slow critic as target before updating it to latest critic
 
 # game parameters
 env = gym.make(env_to_use)
@@ -64,8 +67,12 @@ info['params'] = dict(
 	gamma = gamma,
 	lambda_actor = lambda_actor,
 	lambda_critic = lambda_critic,
-	h_actor = h_actor,
-	h_critic = h_critic,
+	h1_actor = h1_actor,
+	h2_actor = h2_actor,
+	h3_actor = h3_actor,
+	h1_critic = h1_critic,
+	h2_critic = h2_critic,
+	h3_critic = h3_critic,
 	lr_actor = lr_actor,
 	lr_critic = lr_critic,
 	lr_decay = lr_decay,
@@ -99,9 +106,13 @@ episode_inc_op = episodes.assign_add(1)
 
 # actor network
 with tf.variable_scope('actor', reuse=False):
-	actor_hidden = tf.layers.dense(state_ph, h_actor, activation = tf.nn.relu)
+	actor_hidden = tf.layers.dense(state_ph, h1_actor, activation = tf.nn.relu)
 	actor_hidden_drop = tf.layers.dropout(actor_hidden, rate = dropout_actor, training = training_actor)
-	actor_logits = tf.squeeze(tf.layers.dense(actor_hidden_drop, n_actions))
+	actor_hidden_2 = tf.layers.dense(actor_hidden_drop, h2_actor, activation = tf.nn.relu)
+	actor_hidden_drop_2 = tf.layers.dropout(actor_hidden_2, rate = dropout_actor, training = training_actor)
+	actor_hidden_3 = tf.layers.dense(actor_hidden_drop_2, h3_actor, activation = tf.nn.relu)
+	actor_hidden_drop_3 = tf.layers.dropout(actor_hidden_3, rate = dropout_actor, training = training_actor)
+	actor_logits = tf.squeeze(tf.layers.dense(actor_hidden_drop_3, n_actions))
 	actor_logits -= tf.reduce_max(actor_logits) # for numerical stability
 	actor_policy = tf.nn.softmax(actor_logits)
 	actor_logprob_action = actor_logits[action_ph] - tf.reduce_logsumexp(actor_logits)
@@ -109,9 +120,13 @@ with tf.variable_scope('actor', reuse=False):
 # need a function so that we can create the same graph (but with different weights) for normal critic, and
 # the slowly-changing critic used as a target
 def generate_critic_network(s, trainable):
-	critic_hidden = tf.layers.dense(s, h_critic, activation = tf.nn.relu, trainable = trainable)
+	critic_hidden = tf.layers.dense(s, h1_critic, activation = tf.nn.relu, trainable = trainable)
 	critic_hidden_drop = tf.layers.dropout(critic_hidden, rate = dropout_critic, training = trainable)
-	critic_value = tf.squeeze(tf.layers.dense(critic_hidden_drop, 1, trainable = trainable))
+	critic_hidden_2 = tf.layers.dense(critic_hidden_drop, h2_critic, activation = tf.nn.relu, trainable = trainable)
+	critic_hidden_drop_2 = tf.layers.dropout(critic_hidden_2, rate = dropout_critic, training = trainable)
+	critic_hidden_3 = tf.layers.dense(critic_hidden_drop_2, h3_critic, activation = tf.nn.relu, trainable = trainable)
+	critic_hidden_drop_3 = tf.layers.dropout(critic_hidden_3, rate = dropout_critic, training = trainable)
+	critic_value = tf.squeeze(tf.layers.dense(critic_hidden_drop_3, 1, trainable = trainable))
 	return critic_value
 
 # critic network
@@ -213,6 +228,8 @@ for ep in range(num_episodes):
 	total_reward = 0
 	steps_in_ep = 0
 
+	v_s = []
+
 	# Initial state
 	observation = env.reset()
 	# env.render()
@@ -222,6 +239,8 @@ for ep in range(num_episodes):
 		# compute value of current state and action probabilities
 		state_value, action_probs = sess.run([critic_value, actor_policy], 
 			feed_dict={state_ph: observation[None], training_actor: False})
+
+		v_s.append(state_value)
 
 		# get action
 		action = np.random.choice(n_actions, p=action_probs)
@@ -262,6 +281,7 @@ for ep in range(num_episodes):
 			break
 
 	print('Episode %2i, Reward: %7.3f, Steps: %i'%(ep,total_reward,steps_in_ep))
+	print(v_s)
 
 # Finalize and upload results
 writefile('info.json', json.dumps(info))
