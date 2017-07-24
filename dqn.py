@@ -46,7 +46,7 @@ epsilon_end = 0.05		# minimum probability of random action after linear decay pe
 epsilon_decay_length = 1e5		# number of steps over which to linearly decay epsilon
 epsilon_decay_exp = 0.97		# exponential decay rate after reaching epsilon_end (per episode)
 use_ucb_exploration = True 		# flag to chooose between epsilon-greedy and UCB exploration strategies
-state_dim_discretization = 30 	# number of buckets per dimension to discretize the state space into for counting num visits
+state_dim_discretization = 5 	# number of buckets per dimension to discretize the state space into for counting num visits
 q_function_range = 200			# size of range in which true Q values for optimal strategy lie, used for UCB computation
 
 # game parameters
@@ -180,7 +180,6 @@ if use_ucb_exploration:
 	# shape of discrized table will be (number of buckets per state dim * num state dims, number of actions)
 	visited_counter = np.zeros((state_dim_discretization**state_dim,n_actions))
 	disc_interval_sizes = (env.observation_space.high - env.observation_space.low) / state_dim_discretization
-	max_ucb_ep = -1
 else:
 	epsilon = epsilon_start
 	epsilon_linear_step = (epsilon_start-epsilon_end)/epsilon_decay_length
@@ -189,6 +188,8 @@ for ep in range(num_episodes):
 
 	total_reward = 0
 	steps_in_ep = 0
+
+	max_ucb_ep = -1
 
 	# Initial state
 	observation = env.reset()
@@ -270,6 +271,8 @@ for ep in range(num_episodes):
 
 	if use_ucb_exploration:
 		print('Episode %2i, Reward: %7.3f, Steps: %i, Max UCB: %7.3f'%(ep,total_reward,steps_in_ep, max_ucb_ep))
+		if ep%100 == 0:
+			print(visited_counter)
 	else:
 		print('Episode %2i, Reward: %7.3f, Steps: %i, Epsilon: %7.3f'%(ep,total_reward,steps_in_ep, old_epsilon))
 
