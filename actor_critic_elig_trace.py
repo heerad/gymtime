@@ -19,42 +19,39 @@ from os import path
 #####################################################################################################
 ## Setup
 
-env_to_use = 'MountainCar-v0'
+env_to_use = 'Acrobot-v1'
 
 # hyperparameters
-gamma = 1.				# reward discount factor
+gamma = 1				# reward discount factor
 lambda_actor = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for actor
 lambda_critic = 0.9		# TD(\lambda) parameter (0: 1-step TD, 1: MC) for critic
-h1_actor = 32			# hidden layer 1 size for actor
-h2_actor = 32			# hidden layer 2 size for actor
-h3_actor = 32			# hidden layer 3 size for actor
-h1_critic = 32			# hidden layer 1 size for critic
-h2_critic = 32			# hidden layer 2 size for critic
-h3_critic = 32			# hidden layer 3 size for critic
-lr_actor = 1e-4			# learning rate for actor
-lr_critic = 1e-4		# learning rate for critic
-lr_decay = 1			# learning rate decay (per episode)
+lambda_decay = 1		# decay rate for lambda parameters
+h1_actor = 8			# hidden layer 1 size for actor
+h2_actor = 8			# hidden layer 2 size for actor
+h3_actor = 8			# hidden layer 3 size for actor
+h1_critic = 8			# hidden layer 1 size for critic
+h2_critic = 8			# hidden layer 2 size for critic
+h3_critic = 8			# hidden layer 3 size for critic
+lr_actor = 5e-5			# learning rate for actor
+lr_critic = 5e-5		# learning rate for critic
+lr_decay = .9995			# learning rate decay (per episode)
 use_rmsprop = False 	# whether to use RMSprop or SGD
 rmsprop_decay = 0.99	# Decay rate for RMSProp optimization procedure
 rmsprop_eps = 1e-7		# Epsilon for RMSProp optimization procedure
-l2_reg_actor = 0		# L2 regularization factor for actor
-l2_reg_critic = 0		# L2 regularization factor for critic
+l2_reg_actor = 1e-6		# L2 regularization factor for actor
+l2_reg_critic = 1e-6		# L2 regularization factor for critic
 dropout_actor = 0		# dropout rate for actor (0 = no dropout)
 dropout_critic = 0		# dropout rate for critic (0 = no dropout)
-num_episodes = 15000	# number of episodes
+num_episodes = 50000	# number of episodes
 max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
-clip_norm = 100			# maximum gradient norm for clipping
-slow_critic_burnin = 1000		# number of steps where slow critic weights are tied to critic weights
-update_slow_critic_every = 1000	# number of steps to use slow critic as target before updating it to latest critic
+clip_norm = 10			# maximum gradient norm for clipping
+slow_critic_burnin = 100		# number of steps where slow critic weights are tied to critic weights
+update_slow_critic_every = 100	# number of steps to use slow critic as target before updating it to latest critic
 
 # game parameters
 env = gym.make(env_to_use)
 state_dim = np.prod(np.array(env.observation_space.shape)) 	# Get total number of dimensions in state
 n_actions = env.action_space.n 								# Assuming discrete action space
-
-# set seeds to 0
-env.seed(0)
-np.random.seed(0)
 
 # prepare monitorings
 outdir = '/tmp/td_lambda_actor_critic-agent-results'
@@ -67,6 +64,7 @@ info['params'] = dict(
 	gamma = gamma,
 	lambda_actor = lambda_actor,
 	lambda_critic = lambda_critic,
+	lambda_decay = lambda_decay,
 	h1_actor = h1_actor,
 	h2_actor = h2_actor,
 	h3_actor = h3_actor,
@@ -183,7 +181,7 @@ for network in ac_update_inputs: # actor and critic
 			lr = net_update_inputs['lr'] * lr_decay**episodes
 			l2_reg = net_update_inputs['l2_reg']
 			if 'bias' in var.name: l2_reg = 0	# don't regularize biases
-			lambda_ = net_update_inputs['lambda_'] * lr_decay**episodes
+			lambda_ = net_update_inputs['lambda_'] * lambda_decay**episodes
 			
 			# Elig trace update: e <- gamma*lambda*e + grad
 			trace = tf.Variable(tf.zeros(grad.get_shape()), trainable=False, name='trace')
@@ -256,6 +254,7 @@ for ep in range(num_episodes):
 
 		# compute value of next state
 		if done and not env.env._past_limit(): # only consider next state the end state if it wasn't due to timeout
+		# if done:
 			next_state_value = 0
 		elif total_steps < slow_critic_burnin: # don't use the slowly-changing critic just yet
 			next_state_value = sess.run(critic_value, feed_dict={state_ph: next_observation[None]})
@@ -281,7 +280,7 @@ for ep in range(num_episodes):
 			break
 
 	print('Episode %2i, Reward: %7.3f, Steps: %i'%(ep,total_reward,steps_in_ep))
-	print(v_s)
+	print(np.mean(v_s))
 
 # Finalize and upload results
 writefile('info.json', json.dumps(info))
