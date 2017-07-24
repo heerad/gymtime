@@ -10,4 +10,4 @@ TODO:
 * [Prioritized experience replay](https://arxiv.org/pdf/1511.05952.pdf) for DQN to help with MountainCar-v0
 * [DDPG](https://arxiv.org/pdf/1509.02971.pdf) for continuous action spaces
 * Atari environments via convnets
-* [PPO](https://blog.openai.com/openai-baselines-ppo/)
+* [PPO](https://arxiv.org/abs/1707.06347)
