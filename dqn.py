@@ -46,7 +46,7 @@ epsilon_end = 0.05		# minimum probability of random action after linear decay pe
 epsilon_decay_length = 1e5		# number of steps over which to linearly decay epsilon
 epsilon_decay_exp = 0.97		# exponential decay rate after reaching epsilon_end (per episode)
 use_ucb_exploration = True 		# flag to chooose between epsilon-greedy and UCB exploration strategies
-state_dim_discretization = 5 	# number of buckets per dimension to discretize the state space into for counting num visits
+state_dim_discretization = 15 	# number of buckets per dimension to discretize the state space into for counting num visits
 q_function_range = 200			# size of range in which true Q values for optimal strategy lie, used for UCB computation
 
 # game parameters
@@ -167,6 +167,8 @@ sess.run(tf.global_variables_initializer())
 #####################################################################################################
 ## Training
 
+np.set_printoptions(threshold=np.nan)
+
 total_steps = 0
 
 # replay memory
@@ -178,6 +180,8 @@ if use_ucb_exploration:
 	# see: https://en.wikipedia.org/wiki/Hoeffding%27s_inequality#General_case
 	# we choose our confidence level p = t^-4 where t is time steps
 	# shape of discrized table will be (number of buckets per state dim * num state dims, number of actions)
+	# note that this is a hack since in reality Q(s,a) is estimated via a function approximator, rather than
+	# computing separate empirical means for each entry in a table, for which this inequality is valid.
 	visited_counter = np.zeros((state_dim_discretization**state_dim,n_actions))
 	disc_interval_sizes = (env.observation_space.high - env.observation_space.low) / state_dim_discretization
 else:
