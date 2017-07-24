@@ -11,18 +11,19 @@ from collections import deque
 ## Algorithm
 
 # Deep Q-Networks (DQN)
-# An off-policy action-value function based approach (Q-learning) that uses epsilon-greedy exploration
-# to generate experiences (s, a, r, s'). It uses minibatches of these experiences from replay memory
-# to update the Q-network's parameters.
+# An off-policy action-value function based approach (Q-learning) that uses either UCB or epsilon-greedy 
+# exploration to generate experiences (s, a, r, s'). It uses minibatches of these experiences from replay 
+# memory to update the Q-network's parameters.
 # Neural networks are used for function approximation.
 # A slowly-changing "target" Q network, as well as gradient norm clipping, are used to improve
 # stability and encourage convergence.
 # Parameter updates are made via Adam.
+# Assumes discrete action spaces!
 
 #####################################################################################################
 ## Setup
 
-env_to_use = 'LunarLander-v2'
+env_to_use = 'MountainCar-v0'
 
 # hyperparameters
 gamma = 0.99				# reward discount factor
@@ -33,7 +34,7 @@ lr = 5e-5				# learning rate
 lr_decay = 1			# learning rate decay (per episode)
 l2_reg = 1e-6				# L2 regularization factor
 dropout = 0				# dropout rate (0 = no dropout)
-num_episodes = 5000		# number of episodes
+num_episodes = 15000		# number of episodes
 max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
 slow_target_burnin = 1000		# number of steps where slow target weights are tied to current network weights
 update_slow_target_every = 100	# number of steps to use slow target as target before updating it to latest weights
@@ -43,7 +44,10 @@ minibatch_size = 1024	# size of minibatch from experience replay memory for upda
 epsilon_start = 1.0		# probability of random action at start
 epsilon_end = 0.05		# minimum probability of random action after linear decay period
 epsilon_decay_length = 1e5		# number of steps over which to linearly decay epsilon
-epsilon_decay_exp = 0.97	# exponential decay rate after reaching epsilon_end (per episode)
+epsilon_decay_exp = 0.97		# exponential decay rate after reaching epsilon_end (per episode)
+use_ucb_exploration = True 		# flag to chooose between epsilon-greedy and UCB exploration strategies
+state_dim_discretization = 30 	# number of buckets per dimension to discretize the state space into for counting num visits
+q_function_range = 200			# size of range in which true Q values for optimal strategy lie, used for UCB computation
 
 # game parameters
 env = gym.make(env_to_use)
@@ -80,7 +84,10 @@ info['params'] = dict(
 	epsilon_start = epsilon_start,
 	epsilon_end = epsilon_end,
 	epsilon_decay_length = epsilon_decay_length,
-	epsilon_decay_exp = epsilon_decay_exp
+	epsilon_decay_exp = epsilon_decay_exp,
+	use_ucb_exploration = use_ucb_exploration,
+	state_dim_discretization = state_dim_discretization,
+	q_function_range = q_function_range
 )
 
 #####################################################################################################
@@ -161,10 +168,22 @@ sess.run(tf.global_variables_initializer())
 ## Training
 
 total_steps = 0
+
+# replay memory
 experience = deque(maxlen=replay_memory_capacity)
 
-epsilon = epsilon_start
-epsilon_linear_step = (epsilon_start-epsilon_end)/epsilon_decay_length
+# exploration initilization
+if use_ucb_exploration:
+	# state-action visited counter (used for a UCB-based exploration strategy via Hoeffding's inequality)
+	# see: https://en.wikipedia.org/wiki/Hoeffding%27s_inequality#General_case
+	# we choose our confidence level p = t^-4 where t is time steps
+	# shape of discrized table will be (number of buckets per state dim * num state dims, number of actions)
+	visited_counter = np.zeros((state_dim_discretization**state_dim,n_actions))
+	disc_interval_sizes = (env.observation_space.high - env.observation_space.low) / state_dim_discretization
+	max_ucb_ep = -1
+else:
+	epsilon = epsilon_start
+	epsilon_linear_step = (epsilon_start-epsilon_end)/epsilon_decay_length
 
 for ep in range(num_episodes):
 
@@ -177,13 +196,24 @@ for ep in range(num_episodes):
 
 	for t in range(max_steps_ep):
 
-		# choose action according to epsilon-greedy policy wrt Q
-		if np.random.random() < epsilon:
-			action = np.random.randint(n_actions)
-		else:
+		# choose between UCB and epsilon greedy for action selection
+		if use_ucb_exploration:
+			# choose action according to UCB with Hoeffding's inequality applied to the estimated Q values
 			q_s = sess.run(q_action_values, 
-				feed_dict = {state_ph: observation[None], is_training_ph: False})
-			action = np.argmax(q_s)
+					feed_dict = {state_ph: observation[None], is_training_ph: False})
+			obs_discrete = np.minimum(((observation - env.observation_space.low)/disc_interval_sizes).astype(int), state_dim_discretization-1)
+			obs_idx = sum([i_el[1]*state_dim_discretization**i_el[0] for i_el in enumerate(obs_discrete)])
+			ucbs = q_function_range * np.sqrt(2*np.log(total_steps)/visited_counter[obs_idx,:])
+			action = np.argmax(q_s + ucbs)
+			max_ucb_ep = max(max_ucb_ep, max(ucbs))
+		else:
+			# choose action according to epsilon-greedy policy wrt Q
+			if np.random.random() < epsilon:
+				action = np.random.randint(n_actions)
+			else:
+				q_s = sess.run(q_action_values, 
+					feed_dict = {state_ph: observation[None], is_training_ph: False})
+				action = np.argmax(q_s)
 
 		# take step
 		next_observation, reward, done, _info = env.step(action)
@@ -220,22 +250,28 @@ for ep in range(num_episodes):
 		total_steps += 1
 		steps_in_ep += 1
 
-		# linearly decay epsilon from epsilon_start to epsilon_end over epsilon_decay_length steps
-		if total_steps < epsilon_decay_length:
-			epsilon -= epsilon_linear_step
-		# then exponentially decay it every episode
-		elif done:
-			epsilon *= epsilon_decay_exp
-
-		if total_steps == epsilon_decay_length:
-			print('--------------------------------MOVING TO EXPONENTIAL EPSILON DECAY-----------------------------------------')
+		# update exploration parameters
+		if use_ucb_exploration:
+			# increment state-action visited counter
+			visited_counter[obs_idx,action] = visited_counter[obs_idx,action] + 1
+		else:
+			old_epsilon = epsilon
+			# linearly decay epsilon from epsilon_start to epsilon_end over epsilon_decay_length steps
+			if total_steps < epsilon_decay_length:
+				epsilon -= epsilon_linear_step
+			# then exponentially decay it every episode
+			elif done:
+				epsilon *= epsilon_decay_exp
 		
 		if done: 
 			# Increment episode counter
 			_ = sess.run(episode_inc_op)
 			break
 
-	print('Episode %2i, Reward: %7.3f, Steps: %i, Next eps: %7.3f'%(ep,total_reward,steps_in_ep, epsilon))
+	if use_ucb_exploration:
+		print('Episode %2i, Reward: %7.3f, Steps: %i, Max UCB: %7.3f'%(ep,total_reward,steps_in_ep, max_ucb_ep))
+	else:
+		print('Episode %2i, Reward: %7.3f, Steps: %i, Epsilon: %7.3f'%(ep,total_reward,steps_in_ep, old_epsilon))
 
 # Finalize and upload results
 writefile('info.json', json.dumps(info))

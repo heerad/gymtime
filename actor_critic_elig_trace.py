@@ -15,6 +15,7 @@ from os import path
 # A slowly-changing "target" critic network, as well as gradient norm clipping, are used to improve
 # stability and encourage convergence.
 # Parameter updates are made via RMSProp.
+# Assumes discrete action spaces!
 
 #####################################################################################################
 ## Setup
