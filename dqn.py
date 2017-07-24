@@ -26,11 +26,11 @@ from collections import deque
 env_to_use = 'MountainCar-v0'
 
 # hyperparameters
-gamma = 0.99				# reward discount factor
-h1 = 512					# hidden layer 1 size
-h2 = 512					# hidden layer 2 size
-h3 = 512					# hidden layer 3 size
-lr = 5e-5				# learning rate
+gamma = 1				# reward discount factor
+h1 = 128				# hidden layer 1 size
+h2 = 128				# hidden layer 2 size
+h3 = 128				# hidden layer 3 size
+lr = 1e-4				# learning rate
 lr_decay = 1			# learning rate decay (per episode)
 l2_reg = 1e-6				# L2 regularization factor
 dropout = 0				# dropout rate (0 = no dropout)
@@ -46,7 +46,7 @@ epsilon_end = 0.05		# minimum probability of random action after linear decay pe
 epsilon_decay_length = 1e5		# number of steps over which to linearly decay epsilon
 epsilon_decay_exp = 0.97		# exponential decay rate after reaching epsilon_end (per episode)
 use_ucb_exploration = True 		# flag to chooose between epsilon-greedy and UCB exploration strategies
-state_dim_discretization = 15 	# number of buckets per dimension to discretize the state space into for counting num visits
+state_dim_discretization = 5 	# number of buckets per dimension to discretize the state space into for counting num visits
 q_function_range = 200			# size of range in which true Q values for optimal strategy lie, used for UCB computation
 
 # game parameters
@@ -197,7 +197,7 @@ for ep in range(num_episodes):
 
 	# Initial state
 	observation = env.reset()
-	# env.render()
+	if ep%100 == 0: env.render()
 
 	for t in range(max_steps_ep):
 
@@ -222,7 +222,7 @@ for ep in range(num_episodes):
 
 		# take step
 		next_observation, reward, done, _info = env.step(action)
-		# env.render()
+		if ep%20 == 0: env.render()
 		total_reward += reward
 
 		# add this to experience replay buffer
@@ -275,8 +275,7 @@ for ep in range(num_episodes):
 
 	if use_ucb_exploration:
 		print('Episode %2i, Reward: %7.3f, Steps: %i, Max UCB: %7.3f'%(ep,total_reward,steps_in_ep, max_ucb_ep))
-		if ep%100 == 0:
-			print(visited_counter)
+		if ep%100 == 0: print(visited_counter)
 	else:
 		print('Episode %2i, Reward: %7.3f, Steps: %i, Epsilon: %7.3f'%(ep,total_reward,steps_in_ep, old_epsilon))
 
