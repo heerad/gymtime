@@ -14,7 +14,8 @@ from os import path
 # Neural networks are used for function approximation.
 # A slowly-changing "target" critic network, as well as gradient norm clipping, are used to improve
 # stability and encourage convergence.
-# Parameter updates are made via RMSProp.
+# Double Q-learning (between the most-updated network and the slow target) is used in computing TD error to eliminate maximization bias.
+# Parameter updates are made via RMSProp or SGD.
 # Assumes discrete action spaces!
 
 #####################################################################################################
