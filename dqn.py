@@ -27,19 +27,18 @@ env_to_use = 'MountainCar-v0'
 
 # hyperparameters
 gamma = 0.99				# reward discount factor
-h1 = 512					# hidden layer 1 size
-h2 = 512					# hidden layer 2 size
-h3 = 512					# hidden layer 3 size
-lr = 5e-5				# learning rate
+h1 = 128					# hidden layer 1 size
+h2 = 128					# hidden layer 2 size
+h3 = 128					# hidden layer 3 size
+lr = 1e-3				# learning rate
 lr_decay = 1			# learning rate decay (per episode)
 l2_reg = 1e-6				# L2 regularization factor
 dropout = 0				# dropout rate (0 = no dropout)
 num_episodes = 15000		# number of episodes
 max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
-slow_target_burnin = 1000		# number of steps where slow target weights are tied to current network weights
 update_slow_target_every = 100	# number of steps to use slow target as target before updating it to latest weights
-train_every = 10		# number of steps to run the policy (and collect experience) before updating network weights
-replay_memory_capacity = int(1e4)	# capacity of experience replay memory
+train_every = 1			# number of steps to run the policy (and collect experience) before updating network weights
+replay_memory_capacity = int(1e5)	# capacity of experience replay memory
 priority_alpha = 2.0	# exponent by which to transform TD errors in computing experience priority in replay
 priority_beta0 = 0.4	# initial exponent on importance sampling weight for prioritized gradient updates
 priority_beta_decay_length = 10000	# length of time over which to linearly anneal priority_beta to 1
@@ -49,8 +48,8 @@ epsilon_end = 0.05		# minimum probability of random action after linear decay pe
 epsilon_decay_length = 1e5		# number of steps over which to linearly decay epsilon
 epsilon_decay_exp = 0.97		# exponential decay rate after reaching epsilon_end (per episode)
 use_ucb_exploration = True 		# flag to chooose between epsilon-greedy and UCB exploration strategies
-state_dim_discretization = 5 	# number of buckets per dimension to discretize the state space into for counting num visits
-q_function_range = 1000			# size of range in which true Q values for optimal strategy lie, used for UCB computation
+state_dim_discretization = 10 	# number of buckets per dimension to discretize the state space into for counting num visits
+q_function_range = 200		# size of range in which true Q values for optimal strategy lie, used for UCB computation
 
 # game parameters
 env = gym.make(env_to_use)
@@ -79,7 +78,6 @@ info['params'] = dict(
 	dropout = dropout,
 	num_episodes = num_episodes,
 	max_steps_ep = max_steps_ep,
-	slow_target_burnin = slow_target_burnin,
 	update_slow_target_every = update_slow_target_every,
 	train_every = train_every,
 	replay_memory_capacity = replay_memory_capacity,
@@ -101,22 +99,20 @@ np.set_printoptions(threshold=np.nan)
 # replay memory setup (should really be implemented as a SumTree for O(logn) instead of O(n) ops)
 replay_memory = deque(maxlen=replay_memory_capacity)			# used for O(1) popleft() operation
 replay_priorities_exp = deque(maxlen=replay_memory_capacity)	# used to compute sampling probability
-replay_priority_exp_sum = 0										# used for probability normalization
 priority_beta_step = (1. - priority_beta0) / priority_beta_decay_length # used to increase priority_beta
 
 # adds a transition into replay memory with maximal priority
 def add_to_memory(experience):
-	global replay_priority_exp_sum
 	if len(replay_memory) >= replay_memory_capacity:
 		_ = replay_memory.popleft()
-		replay_priority_exp_sum -= replay_priorities_exp.popleft()
+		_ = replay_priorities_exp.popleft()
 	replay_memory.append(experience)
 	max_priority_exp = 1. if len(replay_priorities_exp) == 0 else max(replay_priorities_exp)
 	replay_priorities_exp.append(max_priority_exp)
-	replay_priority_exp_sum += max_priority_exp
 
 def sample_from_memory(minibatch_size, priority_beta):
 	replay_probs = np.zeros(len(replay_priorities_exp))
+	replay_priority_exp_sum = sum(replay_priorities_exp)
 	for i, rpe in enumerate(replay_priorities_exp):
 		replay_probs[i] = rpe/replay_priority_exp_sum
 	minibatch_indices = np.random.choice(len(replay_memory), minibatch_size, p=replay_probs)
@@ -129,10 +125,8 @@ def sample_from_memory(minibatch_size, priority_beta):
 	return minibatch, imp_samp_weights, minibatch_indices
 
 def update_memory_priorities(minibatch_indices, new_priorities):
-	global replay_priority_exp_sum
 	for i, mb_i in enumerate(minibatch_indices):
 		priority_exp = new_priorities[i]**priority_alpha
-		replay_priority_exp_sum += priority_exp - replay_priorities_exp[mb_i]
 		replay_priorities_exp[mb_i] = priority_exp
 
 
@@ -330,7 +324,7 @@ for ep in range(num_episodes):
 
 	if use_ucb_exploration:
 		print('Episode %2i, Reward: %7.3f, Steps: %i, Max UCB: %7.3f'%(ep,total_reward,steps_in_ep, max_ucb_ep))
-		if ep%100 == 0: print(visited_counter)
+		# if ep%100 == 0: print(visited_counter)
 	else:
 		print('Episode %2i, Reward: %7.3f, Steps: %i, Epsilon: %7.3f'%(ep,total_reward,steps_in_ep, old_epsilon))
 
