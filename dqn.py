@@ -15,8 +15,7 @@ from collections import deque
 # exploration to generate experiences (s, a, r, s'). It uses minibatches of these experiences from replay 
 # memory to update the Q-network's parameters, sampled using prioritized experience replay.
 # Neural networks are used for function approximation.
-# A slowly-changing "target" Q network, as well as gradient norm clipping, are used to improve
-# stability and encourage convergence.
+# A slowly-changing "target" Q network is used to improve stability and encourage convergence.
 # Parameter updates are made via Adam.
 # Assumes discrete action spaces!
 
@@ -173,7 +172,7 @@ def generate_network(s, trainable, reuse):
 	action_values = tf.squeeze(tf.layers.dense(hidden_drop_3, n_actions, trainable = trainable, name = 'dense_3', reuse = reuse))
 	return action_values
 
-with tf.variable_scope('q_network') as scope:
+with tf.variable_scope('q_network'):
 	# Q network applied to state_ph
 	q_action_values = generate_network(state_ph, trainable = True, reuse = False)
 	# Q network applied to next_state_ph (for double Q learning)
