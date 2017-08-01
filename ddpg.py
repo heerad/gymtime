@@ -13,7 +13,7 @@ from collections import deque
 # Deep Deterministic Policy Gradient (DDPG)
 # An off-policy actor-critic algorithm that uses additive exploration noise (e.g. an Ornstein-Uhlenbeck process) on top
 # of a deterministic policy to generate experiences (s, a, r, s'). It uses minibatches of these experiences from replay 
-# memory to update the actor (policy) and critic (Q function) parameters, sampled using prioritized experience replay.
+# memory to update the actor (policy) and critic (Q function) parameters.
 # Neural networks are used for function approximation.
 # Slowly-changing "target" networks are used to improve stability and encourage convergence.
 # Parameter updates are made via Adam.
@@ -271,7 +271,7 @@ for ep in range(num_episodes):
 					next_state_ph: np.asarray([elem[3] for elem in minibatch]),
 					is_not_terminal_ph: np.asarray([elem[4] for elem in minibatch]),
 					is_training_ph: True})
-			
+
 			# update slow actor and critic targets towards current actor and critic
 			_ = sess.run(update_slow_targets_op)
 
