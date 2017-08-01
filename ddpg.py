@@ -44,11 +44,8 @@ max_steps_ep = 10000	# default max number of steps per episode (unless env has a
 tau = 1e-2				# soft target update rate
 train_every = 1			# number of steps to run the policy (and collect experience) before updating network weights
 replay_memory_capacity = int(1e5)	# capacity of experience replay memory
-priority_alpha = 2.0	# exponent by which to transform TD errors in computing experience priority in replay
-priority_beta0 = 0.4	# initial exponent on importance sampling weight for prioritized gradient updates
-priority_beta_decay_length = 10000	# length of time over which to linearly anneal priority_beta to 1
 minibatch_size = 1024	# size of minibatch from experience replay memory for updates
-initial_noise_scale = 0.01	# scale of the exploration noise process (1.0 is the range of each action dimension)
+initial_noise_scale = 0.1	# scale of the exploration noise process (1.0 is the range of each action dimension)
 noise_decay = 0.99		# decay rate (per episode) of the scale of the exploration noise process
 exploration_mu = 0.0	# mu parameter for the exploration noise process: dXt = theta*(mu-Xt)*dt + sigma*dWt
 exploration_theta = 0.15 # theta parameter for the exploration noise process: dXt = theta*(mu-Xt)*dt + sigma*dWt
@@ -90,9 +87,6 @@ info['params'] = dict(
 	tau = tau,
 	train_every = train_every,
 	replay_memory_capacity = replay_memory_capacity,
-	priority_alpha = priority_alpha,
-	priority_beta0 = priority_beta0,
-	priority_beta_decay_length = priority_beta_decay_length,
 	minibatch_size = minibatch_size,
 	initial_noise_scale = initial_noise_scale,
 	noise_decay = noise_decay,
@@ -103,42 +97,13 @@ info['params'] = dict(
 
 np.set_printoptions(threshold=np.nan)
 
-# replay memory setup (should really be implemented as a SumTree for O(logn) instead of O(n) ops)
 replay_memory = deque(maxlen=replay_memory_capacity)			# used for O(1) popleft() operation
-replay_priorities_exp = deque(maxlen=replay_memory_capacity)	# used to compute sampling probability
-priority_beta_step = (1. - priority_beta0) / priority_beta_decay_length # used to increase priority_beta
 
-# adds a transition into replay memory with maximal priority
 def add_to_memory(experience):
-	if len(replay_memory) >= replay_memory_capacity:
-		_ = replay_memory.popleft()
-		_ = replay_priorities_exp.popleft()
 	replay_memory.append(experience)
-	max_priority_exp = 1. if len(replay_priorities_exp) == 0 else max(replay_priorities_exp)
-	replay_priorities_exp.append(max_priority_exp)
 
-def sample_from_memory(minibatch_size, priority_beta):
-	rpe_arr = np.zeros(len(replay_priorities_exp))
-	for i, rpe in enumerate(replay_priorities_exp):
-		rpe_arr[i] = rpe
-	replay_probs = rpe_arr / sum(rpe_arr)
-	minibatch_indices = np.random.choice(len(replay_memory), minibatch_size, p=replay_probs)
-	minibatch = []
-	imp_samp_weights = []
-	for mb_i in minibatch_indices:
-		minibatch.append(replay_memory[mb_i])
-		imp_samp_weights.append((len(replay_memory)*replay_probs[mb_i])**(-priority_beta))
-	imp_samp_weights /= max(imp_samp_weights)
-	return minibatch, imp_samp_weights, minibatch_indices
-
-def update_memory_priorities(minibatch_indices, new_priorities):
-	for i, mb_i in enumerate(minibatch_indices):
-		priority_exp = new_priorities[i]**priority_alpha
-		replay_priorities_exp[mb_i] = priority_exp
-
-
-# exploration setup
-
+def sample_from_memory(minibatch_size):
+	return random.sample(replay_memory, minibatch_size)
 
 #####################################################################################################
 ## Tensorflow
@@ -151,7 +116,6 @@ action_ph = tf.placeholder(dtype=tf.float32, shape=[None,action_dim])
 reward_ph = tf.placeholder(dtype=tf.float32, shape=[None])
 next_state_ph = tf.placeholder(dtype=tf.float32, shape=[None,state_dim])
 is_not_terminal_ph = tf.placeholder(dtype=tf.float32, shape=[None]) # indicators (go into target computation)
-imp_samp_weights_ph = tf.placeholder(dtype=tf.float32, shape=[None]) # importance sampling weights for each minibatch element
 is_training_ph = tf.placeholder(dtype=tf.bool, shape=()) # for dropout
 
 # episode counter
@@ -230,11 +194,8 @@ targets = tf.expand_dims(reward_ph, 1) + tf.expand_dims(is_not_terminal_ph, 1) *
 # 1-step temporal difference errors
 td_errors = targets - q_values_of_given_actions
 
-# for prioritized experience replay
-abs_td_errors = tf.abs(td_errors)
-
 # critic loss function (mean-square value error with regularization)
-critic_loss = tf.reduce_mean(tf.square(td_errors)*imp_samp_weights_ph)
+critic_loss = tf.reduce_mean(tf.square(td_errors))
 for var in critic_vars:
 	if not 'bias' in var.name:
 		critic_loss += l2_reg_critic * 0.5 * tf.nn.l2_loss(var)
@@ -298,29 +259,19 @@ for ep in range(num_episodes):
 		# update network weights to fit a minibatch of experience
 		if total_steps%train_every == 0 and len(replay_memory) >= minibatch_size:
 
-			# hyperparameter that controls strength of importance-sampling adjustment
-			priority_beta = min(priority_beta0 + priority_beta_step*ep, 1.)
-
 			# grab N (s,a,r,s') tuples from replay memory
-			# also get importance sampling weights and minibatch indices to deal with prioritized sampling
-			minibatch, imp_samp_weights, minibatch_indices = sample_from_memory(minibatch_size, priority_beta)
+			minibatch = sample_from_memory(minibatch_size)
 
-			# get the absolute TD errors for the minibatch based on the latest model parameters
-			# then update the critic and actor params using (importance-sampled) mean-square value error and 
-			# deterministic policy gradient, respectively
-			new_priorities, _, _ = sess.run([abs_td_errors, critic_train_op, actor_train_op], 
+			# update the critic and actor params using mean-square value error and deterministic policy gradient, respectively
+			_, _ = sess.run([critic_train_op, actor_train_op], 
 				feed_dict = {
 					state_ph: np.asarray([elem[0] for elem in minibatch]),
 					action_ph: np.asarray([elem[1] for elem in minibatch]),
 					reward_ph: np.asarray([elem[2] for elem in minibatch]),
 					next_state_ph: np.asarray([elem[3] for elem in minibatch]),
 					is_not_terminal_ph: np.asarray([elem[4] for elem in minibatch]),
-					imp_samp_weights_ph: np.asarray(imp_samp_weights),
 					is_training_ph: True})
-
-			# update the minibatch's priorities with the absolute TD errors
-			update_memory_priorities(minibatch_indices, new_priorities)
-
+			
 			# update slow actor and critic targets towards current actor and critic
 			_ = sess.run(update_slow_targets_op)
 
