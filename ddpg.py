@@ -48,7 +48,7 @@ priority_alpha = 2.0	# exponent by which to transform TD errors in computing exp
 priority_beta0 = 0.4	# initial exponent on importance sampling weight for prioritized gradient updates
 priority_beta_decay_length = 10000	# length of time over which to linearly anneal priority_beta to 1
 minibatch_size = 1024	# size of minibatch from experience replay memory for updates
-initial_noise_scale = 0.1	# scale of the exploration noise process (1.0 is the range of each action dimension)
+initial_noise_scale = 0.01	# scale of the exploration noise process (1.0 is the range of each action dimension)
 noise_decay = 0.99		# decay rate (per episode) of the scale of the exploration noise process
 exploration_mu = 0.0	# mu parameter for the exploration noise process: dXt = theta*(mu-Xt)*dt + sigma*dWt
 exploration_theta = 0.15 # theta parameter for the exploration noise process: dXt = theta*(mu-Xt)*dt + sigma*dWt
@@ -167,7 +167,7 @@ def generate_actor_network(s, trainable, reuse):
 	hidden_3 = tf.layers.dense(hidden_drop_2, h3_actor, activation = tf.nn.relu, trainable = trainable, name = 'dense_2', reuse = reuse)
 	hidden_drop_3 = tf.layers.dropout(hidden_3, rate = dropout_actor, training = trainable & is_training_ph)
 	actions_unscaled = tf.layers.dense(hidden_drop_3, action_dim, trainable = trainable, name = 'dense_3', reuse = reuse)
-	actions = env.action_space.low + tf.nn.softmax(actions_unscaled)*(env.action_space.high - env.action_space.low) # bound the actions to the valid range
+	actions = env.action_space.low + tf.nn.sigmoid(actions_unscaled)*(env.action_space.high - env.action_space.low) # bound the actions to the valid range
 	return actions
 
 # actor network
