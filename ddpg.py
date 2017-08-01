@@ -26,12 +26,12 @@ env_to_use = 'Pendulum-v0'
 
 # hyperparameters
 gamma = 0.99				# reward discount factor
-h1_actor = 128				# hidden layer 1 size for the actor
-h2_actor = 128				# hidden layer 2 size for the actor
-h3_actor = 128				# hidden layer 3 size for the actor
-h1_critic = 128				# hidden layer 1 size for the critic
-h2_critic = 128				# hidden layer 2 size for the critic
-h3_critic = 128				# hidden layer 3 size for the critic
+h1_actor = 8				# hidden layer 1 size for the actor
+h2_actor = 8				# hidden layer 2 size for the actor
+h3_actor = 8				# hidden layer 3 size for the actor
+h1_critic = 8				# hidden layer 1 size for the critic
+h2_critic = 8				# hidden layer 2 size for the critic
+h3_critic = 8				# hidden layer 3 size for the critic
 lr_actor = 1e-3				# learning rate for the actor
 lr_critic = 1e-3			# learning rate for the critic
 lr_decay = 1				# learning rate decay (per episode)
@@ -41,7 +41,7 @@ dropout_actor = 0			# dropout rate for actor (0 = no dropout)
 dropout_critic = 0			# dropout rate for critic (0 = no dropout)
 num_episodes = 15000		# number of episodes
 max_steps_ep = 10000	# default max number of steps per episode (unless env has a lower hardcoded limit)
-tau = 1e-3				# soft target update rate
+tau = 1e-2				# soft target update rate
 train_every = 1			# number of steps to run the policy (and collect experience) before updating network weights
 replay_memory_capacity = int(1e5)	# capacity of experience replay memory
 priority_alpha = 2.0	# exponent by which to transform TD errors in computing experience priority in replay
@@ -118,10 +118,10 @@ def add_to_memory(experience):
 	replay_priorities_exp.append(max_priority_exp)
 
 def sample_from_memory(minibatch_size, priority_beta):
-	replay_probs = np.zeros(len(replay_priorities_exp))
-	replay_priority_exp_sum = sum(replay_priorities_exp)
+	rpe_arr = np.zeros(len(replay_priorities_exp))
 	for i, rpe in enumerate(replay_priorities_exp):
-		replay_probs[i] = rpe/replay_priority_exp_sum
+		rpe_arr[i] = rpe
+	replay_probs = rpe_arr / sum(rpe_arr)
 	minibatch_indices = np.random.choice(len(replay_memory), minibatch_size, p=replay_probs)
 	minibatch = []
 	imp_samp_weights = []
@@ -225,7 +225,7 @@ update_slow_targets_op = tf.group(*update_slow_target_ops, name='update_slow_tar
 # One step TD targets y_i for (s,a) from experience replay
 # = r_i + gamma*Q_slow(s',mu_slow(s')) if s' is not terminal
 # = r_i if s' terminal
-targets = reward_ph + is_not_terminal_ph * gamma * slow_q_values_next
+targets = tf.expand_dims(reward_ph, 1) + tf.expand_dims(is_not_terminal_ph, 1) * gamma * slow_q_values_next
 
 # 1-step temporal difference errors
 td_errors = targets - q_values_of_given_actions
