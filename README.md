@@ -1,8 +1,8 @@
 # gymtime
-Deep RL algorithms for OpenAI gym's ~~[environments](https://gym.openai.com/envs)~~ (link taken down)
+Deep RL algorithms for OpenAI gym's [environments](https://gym.openai.com/envs)
 
 
-See Heerad's submissions ~~[here](https://gym.openai.com/users/heerad)~~ (link taken down)
+See Heerad's submissions [here](https://gym.openai.com/users/heerad)
 
 Implemented:
 * Actor-critic with per-step updates using eligibiilty traces

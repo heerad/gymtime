@@ -16,6 +16,7 @@ from collections import deque
 # memory to update the Q-network's parameters, sampled using prioritized experience replay.
 # Neural networks are used for function approximation.
 # A slowly-changing "target" Q network is used to improve stability and encourage convergence.
+# Double Q-learning (between the most-updated network and the slow target) is used in computing TD error to eliminate maximization bias.
 # Parameter updates are made via Adam.
 # Assumes discrete action spaces!
 
